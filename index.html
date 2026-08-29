@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="description" content="Explainable route danger analysis for safer EVE Online travel." />
+    <meta name="theme-color" content="#071014" />
+    <title>EVE Safe Hauling & Transport</title>
+    <link rel="stylesheet" href="./styles.css" />
+    <script src="./app.js" defer></script>
+  </head>
+  <body>
+    <header class="topbar">
+      <div class="topbar-inner">
+        <div class="brand">
+          <div class="brand-mark" aria-hidden="true">⌁</div>
+          <div>
+            <p class="overline accent">New Eden Transit Desk</p>
+            <h1>Safe Hauling &amp; Transport</h1>
+          </div>
+        </div>
+        <div class="status"><span class="status-dot"></span>Demo intelligence online</div>
+      </div>
+    </header>
+
+    <main class="workspace">
+      <aside class="controls panel">
+        <div class="section-title"><span aria-hidden="true">⌖</span><h2>Route parameters</h2></div>
+        <form id="route-form">
+          <label>
+            <span class="field-label">Origin system</span>
+            <input id="origin" value="Jita" autocomplete="off" />
+          </label>
+          <div class="down-arrow" aria-hidden="true">↓</div>
+          <label>
+            <span class="field-label">Destination system</span>
+            <input id="destination" value="Dodixie" autocomplete="off" />
+          </label>
+          <label>
+            <span class="field-label">Ship profile</span>
+            <select id="ship">
+              <option value="iteron">Iteron Mark V</option>
+              <option value="sunesis">Sunesis</option>
+              <option value="blockade">Blockade Runner</option>
+              <option value="shuttle">Shuttle</option>
+            </select>
+          </label>
+          <label>
+            <span class="field-label">Ship + cargo value</span>
+            <span class="input-wrap">
+              <input id="cargo" type="number" min="0" step="5000000" value="180000000" />
+              <span class="input-suffix">ISK</span>
+            </span>
+            <span id="cargo-display" class="field-note">180m ISK</span>
+          </label>
+          <fieldset>
+            <legend class="field-label">Route priority</legend>
+            <div class="priority-grid">
+              <button class="priority active" type="button" data-mode="shortest">◷ Shortest</button>
+              <button class="priority" type="button" data-mode="safer">◇ Safer</button>
+            </div>
+          </fieldset>
+          <button class="analyze" type="submit">◎ Analyze route</button>
+        </form>
+        <p class="demo-note">Current screen uses demonstration intelligence. Live ESI and kill-activity feeds are the next data layer.</p>
+      </aside>
+
+      <section id="results" class="results" aria-live="polite">
+        <div class="top-grid">
+          <article class="panel journey">
+            <div class="journey-head">
+              <div><p class="overline">Analyzed journey</p><h2><span id="origin-title">Jita</span><b>›</b><span id="destination-title">Dodixie</span></h2></div>
+              <div class="journey-meta"><span id="jumps">12 jumps</span><span id="eta">10–14 min</span><strong id="route-label">Shortest route</strong></div>
+            </div>
+            <div id="route-map" class="route-map"></div>
+            <div id="route-warning" class="route-warning"></div>
+          </article>
+
+          <article id="risk-card" class="risk-card high">
+            <div class="risk-head"><p class="overline">Journey risk</p><span id="risk-level" class="risk-pill">HIGH</span></div>
+            <div class="score"><strong id="risk-score">97</strong><span>/ 100</span></div>
+            <div class="meter"><span id="risk-meter"></span></div>
+            <p id="risk-copy" class="risk-copy"></p>
+            <button id="compare-route" class="secondary-button" type="button">⌁ Compare safer route</button>
+          </article>
+        </div>
+
+        <div class="bottom-grid">
+          <article class="panel decision">
+            <div class="decision-head">
+              <div><p class="overline">Decision support</p><h3>Why this route scored <span id="decision-score">97</span></h3></div>
+              <div class="tabs" role="tablist">
+                <button class="tab active" type="button" data-tab="factors" role="tab">Risk factors</button>
+                <button class="tab" type="button" data-tab="formula" role="tab">Score formula</button>
+              </div>
+            </div>
+            <div id="factors-panel" class="tab-panel"></div>
+            <div id="formula-panel" class="tab-panel hidden"></div>
+          </article>
+
+          <article class="briefing">
+            <p class="overline green">✦ Travel briefing</p>
+            <h3>Before you undock</h3>
+            <ul id="briefing-list"></ul>
+          </article>
+        </div>
+      </section>
+    </main>
+
+    <footer>
+      <p>Independent EVE Online utility. EVE Online and the EVE logo are the registered trademarks of CCP hf.</p>
+    </footer>
+  </body>
+</html>
