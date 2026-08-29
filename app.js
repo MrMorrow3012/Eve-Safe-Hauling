@@ -32,9 +32,13 @@ const routeProfiles = {
   }
 };
 
-const state = { mode: "shortest" };
+const state = { mode: "safer", blockedSystems: ["Tama"] };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
+
+function escapeHtml(value) {
+  return String(value).replace(/[&<>"']/g, (character) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#039;" })[character]);
+}
 
 function formatIsk(value) {
   if (value >= 1_000_000_000) return `${(value / 1_000_000_000).toFixed(1)}b ISK`;
@@ -48,6 +52,38 @@ function cargoPenalty(value) {
   if (value >= 100_000_000) return 10;
   if (value >= 25_000_000) return 6;
   return 2;
+}
+
+function blockedOnRoute(mode, systems = state.blockedSystems) {
+  return routeProfiles[mode].systems
+    .map((system) => system.name)
+    .filter((systemName) => systems.some((blocked) => blocked.toLowerCase() === systemName.toLowerCase()));
+}
+
+function addBlockedSystem() {
+  const input = $("#block-input");
+  const names = input.value.split(",").map((name) => name.trim()).filter(Boolean);
+  if (!names.length) return;
+  const next = [...state.blockedSystems];
+  names.forEach((name) => {
+    if (!next.some((blocked) => blocked.toLowerCase() === name.toLowerCase())) next.push(name);
+  });
+  if (blockedOnRoute("shortest", next).length && blockedOnRoute("safer", next).length) {
+    $("#block-error").textContent = "No demonstration route avoids every excluded system. Remove one exclusion or wait for live routing.";
+    $("#block-error").hidden = false;
+    return;
+  }
+  state.blockedSystems = next;
+  input.value = "";
+  $("#block-error").hidden = true;
+  if (blockedOnRoute(state.mode).length) state.mode = state.mode === "shortest" ? "safer" : "shortest";
+  render();
+}
+
+function removeBlockedSystem(name) {
+  state.blockedSystems = state.blockedSystems.filter((blocked) => blocked !== name);
+  $("#block-error").hidden = true;
+  render();
 }
 
 function calculate() {
@@ -75,6 +111,15 @@ function render() {
   $("#jumps").textContent = `${data.route.jumps} jumps`;
   $("#eta").textContent = data.route.eta;
   $("#route-label").textContent = data.route.label;
+  $("#excluded-count").textContent = state.blockedSystems.length ? `${state.blockedSystems.length} excluded` : "";
+  $("#exclude-tags").innerHTML = state.blockedSystems.map((name) => `<button class="exclude-chip" type="button" data-remove-system="${escapeHtml(name)}">${escapeHtml(name)} ×</button>`).join("");
+  $$("[data-remove-system]").forEach((button) => button.addEventListener("click", () => removeBlockedSystem(button.dataset.removeSystem)));
+  $$(".priority").forEach((button) => {
+    const blocked = blockedOnRoute(button.dataset.mode);
+    button.disabled = blocked.length > 0;
+    button.title = blocked.length ? `Blocked by ${blocked.join(", ")}` : "";
+    button.classList.toggle("active", button.dataset.mode === state.mode);
+  });
 
   $("#route-map").innerHTML = data.route.systems.map((system, index) => `
     <div class="route-stop">
@@ -97,7 +142,12 @@ function render() {
     : data.level === "ELEVATED"
       ? "Travel is possible with preparation, but one or more systems need caution."
       : "No major route warning is present in this demonstration profile.";
-  $("#compare-route").textContent = mode === "shortest" ? "⌁ Compare safer route" : "⌁ Compare shortest route";
+  const alternate = mode === "shortest" ? "safer" : "shortest";
+  const alternateBlocked = blockedOnRoute(alternate);
+  $("#compare-route").disabled = alternateBlocked.length > 0;
+  $("#compare-route").textContent = alternateBlocked.length
+    ? `⌁ ${alternate === "safer" ? "Safer" : "Shortest"} route blocked by ${alternateBlocked.join(", ")}`
+    : mode === "shortest" ? "⌁ Compare safer route" : "⌁ Compare shortest route";
 
   $("#factors-panel").innerHTML = `<div class="factor-grid">
     ${factor("◇", "Security status", data.route.factors.security, 28, mode === "shortest" ? "Route includes 0.3 low-sec systems." : "Route remains in high security space.", mode === "shortest" ? "critical" : "low")}
@@ -137,8 +187,10 @@ $("#route-form").addEventListener("submit", (event) => {
 });
 $$(["#origin", "#destination", "#cargo", "#ship"].join(",")).forEach((control) => control.addEventListener("change", render));
 $("#cargo").addEventListener("input", () => $("#cargo-display").textContent = formatIsk(Math.max(0, Number($("#cargo").value) || 0)));
+$("#block-add").addEventListener("click", addBlockedSystem);
+$("#block-input").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); addBlockedSystem(); } });
 $$([".priority"].join(",")).forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
-$("#compare-route").addEventListener("click", () => setMode(state.mode === "shortest" ? "safer" : "shortest"));
+$("#compare-route").addEventListener("click", () => { const alternate = state.mode === "shortest" ? "safer" : "shortest"; if (!blockedOnRoute(alternate).length) setMode(alternate); });
 $$([".tab"].join(",")).forEach((button) => button.addEventListener("click", () => {
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab === button));
   $("#factors-panel").classList.toggle("hidden", button.dataset.tab !== "factors");

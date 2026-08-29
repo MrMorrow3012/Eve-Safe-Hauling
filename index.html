@@ -53,11 +53,21 @@
             </span>
             <span id="cargo-display" class="field-note">180m ISK</span>
           </label>
+          <div class="avoid-block">
+            <span class="field-label">Avoid systems</span>
+            <div class="avoid-row">
+              <input id="block-input" placeholder="Tama, Rancer…" aria-label="System to avoid" />
+              <button id="block-add" class="exclude-add" type="button">⊘ Add</button>
+            </div>
+            <div id="exclude-tags" class="exclude-tags" aria-label="Excluded systems"></div>
+            <p class="avoid-note">Routes containing an excluded system are removed from consideration.</p>
+            <p id="block-error" class="block-error" hidden></p>
+          </div>
           <fieldset>
             <legend class="field-label">Route priority</legend>
             <div class="priority-grid">
-              <button class="priority active" type="button" data-mode="shortest">◷ Shortest</button>
-              <button class="priority" type="button" data-mode="safer">◇ Safer</button>
+              <button class="priority" type="button" data-mode="shortest">◷ Shortest</button>
+              <button class="priority active" type="button" data-mode="safer">◇ Safer</button>
             </div>
           </fieldset>
           <button class="analyze" type="submit">◎ Analyze route</button>
@@ -70,7 +80,7 @@
           <article class="panel journey">
             <div class="journey-head">
               <div><p class="overline">Analyzed journey</p><h2><span id="origin-title">Jita</span><b>›</b><span id="destination-title">Dodixie</span></h2></div>
-              <div class="journey-meta"><span id="jumps">12 jumps</span><span id="eta">10–14 min</span><strong id="route-label">Shortest route</strong></div>
+              <div class="journey-meta"><span id="jumps">12 jumps</span><span id="eta">10–14 min</span><strong id="route-label">Shortest route</strong><span id="excluded-count" class="excluded-count"></span></div>
             </div>
             <div id="route-map" class="route-map"></div>
             <div id="route-warning" class="route-warning"></div>

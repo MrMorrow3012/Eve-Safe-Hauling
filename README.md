@@ -1,6 +1,6 @@
 # EVE Safe Hauling & Transport
 
-An explainable route-risk prototype for EVE Online travel and hauling. This version is a fully static website: it needs no server, database, package installation, or build command.
+An explainable route-risk prototype for EVE Online travel and hauling. Players can exclude systems such as Tama, and routes containing an excluded system are removed from consideration. This version is a fully static website: it needs no server, database, package installation, or build command.
 
 ## Publish with GitHub Pages
 
