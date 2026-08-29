@@ -1,6 +1,6 @@
 # EVE Safe Hauling & Transport
 
-An explainable route-risk prototype for EVE Online travel and hauling. Players can exclude systems such as Tama, and routes containing an excluded system are removed from consideration. This version is a fully static website: it needs no server, database, package installation, or build command.
+An explainable route-risk prototype for EVE Online travel and hauling. Players can search EVE's public ESI for verified solar-system names, add systems such as Tama to a blocked list, and remove them with one click. Routes containing an excluded system are removed from consideration. This version is a fully static website: it needs no server, database, package installation, or build command.
 
 ## Publish with GitHub Pages
 
@@ -19,7 +19,7 @@ Double-click `index.html`, or serve this directory with any static web server.
 
 ## Current data status
 
-The interface and score calculations work, but the route and danger activity values are demonstration data. The planned next layer is live EVE ESI routing plus current kill and gate-camp activity.
+The blocked-system autocomplete calls EVE's public ESI search and universe-name endpoints directly from the browser. It does not require an EVE login, but that feature needs an internet connection. Route geometry, danger activity, and score values remain demonstration data.
 
 ## Files
 

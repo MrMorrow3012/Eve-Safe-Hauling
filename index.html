@@ -56,9 +56,13 @@
           <div class="avoid-block">
             <span class="field-label">Avoid systems</span>
             <div class="avoid-row">
-              <input id="block-input" placeholder="Tama, Rancer…" aria-label="System to avoid" />
+              <div class="block-search">
+                <input id="block-input" placeholder="Search systems (e.g. Tama)" aria-label="Search for a solar system to avoid" role="combobox" aria-autocomplete="list" aria-expanded="false" aria-controls="system-suggestions" autocomplete="off" />
+                <div id="system-suggestions" class="system-suggestions" role="listbox" hidden></div>
+              </div>
               <button id="block-add" class="exclude-add" type="button">⊘ Add</button>
             </div>
+            <p id="search-status" class="search-status" hidden></p>
             <div id="exclude-tags" class="exclude-tags" aria-label="Excluded systems"></div>
             <p class="avoid-note">Routes containing an excluded system are removed from consideration.</p>
             <p id="block-error" class="block-error" hidden></p>
@@ -72,7 +76,7 @@
           </fieldset>
           <button class="analyze" type="submit">◎ Analyze route</button>
         </form>
-        <p class="demo-note">Current screen uses demonstration intelligence. Live ESI and kill-activity feeds are the next data layer.</p>
+        <p class="demo-note">System names are verified through EVE ESI. Route risk and kill-activity values remain demonstration intelligence.</p>
       </aside>
 
       <section id="results" class="results" aria-live="polite">

@@ -32,7 +32,7 @@ const routeProfiles = {
   }
 };
 
-const state = { mode: "safer", blockedSystems: ["Tama"] };
+const state = { mode: "safer", blockedSystems: ["Tama"], suggestions: [], activeSuggestion: 0, searchTimer: null, searchController: null };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -60,24 +60,127 @@ function blockedOnRoute(mode, systems = state.blockedSystems) {
     .filter((systemName) => systems.some((blocked) => blocked.toLowerCase() === systemName.toLowerCase()));
 }
 
-function addBlockedSystem() {
-  const input = $("#block-input");
-  const names = input.value.split(",").map((name) => name.trim()).filter(Boolean);
-  if (!names.length) return;
-  const next = [...state.blockedSystems];
-  names.forEach((name) => {
-    if (!next.some((blocked) => blocked.toLowerCase() === name.toLowerCase())) next.push(name);
+async function searchSolarSystems(query, strict, signal) {
+  const searchUrl = new URL("https://esi.evetech.net/latest/search/");
+  searchUrl.search = new URLSearchParams({ categories: "solar_system", search: query, strict: String(strict), datasource: "tranquility", language: "en" }).toString();
+  const searchResponse = await fetch(searchUrl, { signal });
+  if (!searchResponse.ok) throw new Error("ESI system search failed");
+  const matches = await searchResponse.json();
+  const ids = (matches.solar_system || []).slice(0, 20);
+  if (!ids.length) return [];
+  const namesResponse = await fetch("https://esi.evetech.net/latest/universe/names/?datasource=tranquility", {
+    method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids), signal
   });
-  if (blockedOnRoute("shortest", next).length && blockedOnRoute("safer", next).length) {
-    $("#block-error").textContent = "No demonstration route avoids every excluded system. Remove one exclusion or wait for live routing.";
-    $("#block-error").hidden = false;
+  if (!namesResponse.ok) throw new Error("ESI name lookup failed");
+  const systems = await namesResponse.json();
+  const normalized = query.toLocaleLowerCase();
+  return systems.filter((item) => item.category === "solar_system").sort((a, b) => {
+    const aName = a.name.toLocaleLowerCase();
+    const bName = b.name.toLocaleLowerCase();
+    const aRank = aName === normalized ? 0 : aName.startsWith(normalized) ? 1 : 2;
+    const bRank = bName === normalized ? 0 : bName.startsWith(normalized) ? 1 : 2;
+    return aRank - bRank || a.name.localeCompare(b.name);
+  });
+}
+
+function showSearchStatus(message, isError = false) {
+  const status = $("#search-status");
+  status.textContent = message;
+  status.classList.toggle("error", isError);
+  status.hidden = !message;
+}
+
+function renderSuggestions() {
+  const list = $("#system-suggestions");
+  list.innerHTML = state.suggestions.map((system, index) =>
+    `<button id="system-option-${system.id}" class="system-suggestion${index === state.activeSuggestion ? " active" : ""}" type="button" role="option" aria-selected="${index === state.activeSuggestion}" data-system-name="${escapeHtml(system.name)}"><span>${escapeHtml(system.name)}</span><small>Solar system</small></button>`
+  ).join("");
+  list.hidden = !state.suggestions.length;
+  $("#block-input").setAttribute("aria-expanded", String(state.suggestions.length > 0));
+  if (state.suggestions[state.activeSuggestion]) $("#block-input").setAttribute("aria-activedescendant", `system-option-${state.suggestions[state.activeSuggestion].id}`);
+  else $("#block-input").removeAttribute("aria-activedescendant");
+  $$('[data-system-name]').forEach((button, index) => {
+    button.addEventListener("mouseenter", () => {
+      if (state.activeSuggestion !== index) { state.activeSuggestion = index; renderSuggestions(); }
+    });
+    button.addEventListener("click", () => addBlockedSystem(button.dataset.systemName));
+  });
+}
+
+function queueSystemSearch() {
+  const query = $("#block-input").value.trim();
+  window.clearTimeout(state.searchTimer);
+  if (state.searchController) state.searchController.abort();
+  state.suggestions = [];
+  state.activeSuggestion = 0;
+  renderSuggestions();
+  $("#block-error").hidden = true;
+  if (!query) { showSearchStatus(""); return; }
+  if (query.length < 3) { showSearchStatus("Type at least 3 characters to search ESI."); return; }
+  showSearchStatus("Searching EVE systems…");
+  state.searchController = new AbortController();
+  state.searchTimer = window.setTimeout(async () => {
+    try {
+      const systems = await searchSolarSystems(query, false, state.searchController.signal);
+      state.suggestions = systems.filter((item) => !state.blockedSystems.some((blocked) => blocked.toLocaleLowerCase() === item.name.toLocaleLowerCase())).slice(0, 8);
+      state.activeSuggestion = 0;
+      renderSuggestions();
+      showSearchStatus(state.suggestions.length ? "" : "No matching unblocked solar systems.");
+    } catch (error) {
+      if (error.name !== "AbortError") showSearchStatus("ESI search is unavailable. Try again.", true);
+    }
+  }, 280);
+}
+
+function addBlockedSystem(name) {
+  const input = $("#block-input");
+  const canonicalName = String(name || "").trim();
+  if (!canonicalName) return;
+  if (state.blockedSystems.some((blocked) => blocked.toLocaleLowerCase() === canonicalName.toLocaleLowerCase())) {
+    input.value = "";
+    state.suggestions = [];
+    renderSuggestions();
+    showSearchStatus("");
     return;
   }
+  const next = [...state.blockedSystems, canonicalName];
+  const everyDemoRouteBlocked = blockedOnRoute("shortest", next).length > 0 && blockedOnRoute("safer", next).length > 0;
   state.blockedSystems = next;
   input.value = "";
-  $("#block-error").hidden = true;
-  if (blockedOnRoute(state.mode).length) state.mode = state.mode === "shortest" ? "safer" : "shortest";
+  state.suggestions = [];
+  renderSuggestions();
+  showSearchStatus("");
+  $("#block-error").textContent = everyDemoRouteBlocked ? "Every demonstration route now contains a blocked system. Live routing would need to find another path." : "";
+  $("#block-error").hidden = !everyDemoRouteBlocked;
+  const alternate = state.mode === "shortest" ? "safer" : "shortest";
+  if (blockedOnRoute(state.mode).length && !blockedOnRoute(alternate).length) state.mode = alternate;
   render();
+}
+
+async function confirmBlockedSystem() {
+  const query = $("#block-input").value.trim();
+  if (!query) return;
+  if (state.suggestions[state.activeSuggestion]) {
+    addBlockedSystem(state.suggestions[state.activeSuggestion].name);
+    return;
+  }
+  showSearchStatus("Checking system name with ESI…");
+  $("#block-error").hidden = true;
+  try {
+    const systems = await searchSolarSystems(query, true);
+    const exact = systems.find((item) => item.name.toLocaleLowerCase() === query.toLocaleLowerCase());
+    if (!exact) {
+      showSearchStatus("");
+      $("#block-error").textContent = "Choose a valid solar system from the ESI results.";
+      $("#block-error").hidden = false;
+      return;
+    }
+    addBlockedSystem(exact.name);
+  } catch {
+    showSearchStatus("");
+    $("#block-error").textContent = "EVE's system search is unavailable right now. Please try again.";
+    $("#block-error").hidden = false;
+  }
 }
 
 function removeBlockedSystem(name) {
@@ -187,8 +290,19 @@ $("#route-form").addEventListener("submit", (event) => {
 });
 $$(["#origin", "#destination", "#cargo", "#ship"].join(",")).forEach((control) => control.addEventListener("change", render));
 $("#cargo").addEventListener("input", () => $("#cargo-display").textContent = formatIsk(Math.max(0, Number($("#cargo").value) || 0)));
-$("#block-add").addEventListener("click", addBlockedSystem);
-$("#block-input").addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); addBlockedSystem(); } });
+$("#block-add").addEventListener("click", () => { void confirmBlockedSystem(); });
+$("#block-input").addEventListener("input", queueSystemSearch);
+$("#block-input").addEventListener("keydown", (event) => {
+  if (event.key === "ArrowDown" && state.suggestions.length) {
+    event.preventDefault(); state.activeSuggestion = (state.activeSuggestion + 1) % state.suggestions.length; renderSuggestions();
+  } else if (event.key === "ArrowUp" && state.suggestions.length) {
+    event.preventDefault(); state.activeSuggestion = state.activeSuggestion === 0 ? state.suggestions.length - 1 : state.activeSuggestion - 1; renderSuggestions();
+  } else if (event.key === "Enter") {
+    event.preventDefault(); void confirmBlockedSystem();
+  } else if (event.key === "Escape") {
+    state.suggestions = []; renderSuggestions();
+  }
+});
 $$([".priority"].join(",")).forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
 $("#compare-route").addEventListener("click", () => { const alternate = state.mode === "shortest" ? "safer" : "shortest"; if (!blockedOnRoute(alternate).length) setMode(alternate); });
 $$([".tab"].join(",")).forEach((button) => button.addEventListener("click", () => {
