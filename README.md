@@ -19,7 +19,7 @@ Double-click `index.html`, or serve this directory with any static web server.
 
 ## Current data status
 
-The blocked-system autocomplete calls EVE's public ESI search and universe-name endpoints directly from the browser. It does not require an EVE login, but that feature needs an internet connection. Route geometry, danger activity, and score values remain demonstration data.
+The blocked-system autocomplete and complete jump-by-jump route call EVE's public ESI endpoints directly from the browser using the `2025-09-30` compatibility date. No EVE login is required, but those features need an internet connection. Danger activity and risk-score values remain demonstration data.
 
 ## Files
 

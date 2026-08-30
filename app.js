@@ -32,7 +32,9 @@ const routeProfiles = {
   }
 };
 
-const state = { mode: "safer", blockedSystems: ["Tama"], suggestions: [], activeSuggestion: 0, searchTimer: null, searchController: null };
+const ESI_BASE = "https://esi.evetech.net";
+const ESI_COMPATIBILITY_DATE = "2025-09-30";
+const state = { mode: "safer", blockedSystems: ["Tama"], suggestions: [], activeSuggestion: 0, searchTimer: null, searchController: null, liveRoute: null, routeLoading: false, routeError: "" };
 const $ = (selector) => document.querySelector(selector);
 const $$ = (selector) => [...document.querySelectorAll(selector)];
 
@@ -54,21 +56,15 @@ function cargoPenalty(value) {
   return 2;
 }
 
-function blockedOnRoute(mode, systems = state.blockedSystems) {
-  return routeProfiles[mode].systems
-    .map((system) => system.name)
-    .filter((systemName) => systems.some((blocked) => blocked.toLowerCase() === systemName.toLowerCase()));
-}
-
 async function searchSolarSystems(query, strict, signal) {
-  const searchUrl = new URL("https://esi.evetech.net/latest/search/");
-  searchUrl.search = new URLSearchParams({ categories: "solar_system", search: query, strict: String(strict), datasource: "tranquility", language: "en" }).toString();
+  const searchUrl = new URL(`${ESI_BASE}/search`);
+  searchUrl.search = new URLSearchParams({ categories: "solar_system", search: query, strict: String(strict), compatibility_date: ESI_COMPATIBILITY_DATE }).toString();
   const searchResponse = await fetch(searchUrl, { signal });
   if (!searchResponse.ok) throw new Error("ESI system search failed");
   const matches = await searchResponse.json();
   const ids = (matches.solar_system || []).slice(0, 20);
   if (!ids.length) return [];
-  const namesResponse = await fetch("https://esi.evetech.net/latest/universe/names/?datasource=tranquility", {
+  const namesResponse = await fetch(`${ESI_BASE}/universe/names?compatibility_date=${ESI_COMPATIBILITY_DATE}`, {
     method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(ids), signal
   });
   if (!namesResponse.ok) throw new Error("ESI name lookup failed");
@@ -81,6 +77,69 @@ async function searchSolarSystems(query, strict, signal) {
     const bRank = bName === normalized ? 0 : bName.startsWith(normalized) ? 1 : 2;
     return aRank - bRank || a.name.localeCompare(b.name);
   });
+}
+
+async function resolveExactSystem(name) {
+  const systems = await searchSolarSystems(name.trim(), true);
+  return systems.find((system) => system.name.toLocaleLowerCase() === name.trim().toLocaleLowerCase());
+}
+
+async function loadLiveRoute(mode = state.mode) {
+  const originName = $("#origin").value.trim();
+  const destinationName = $("#destination").value.trim();
+  if (!originName || !destinationName) return;
+  state.routeLoading = true;
+  state.routeError = "";
+  $("#results").classList.add("loading");
+  $(".analyze").textContent = "◎ Loading ESI route…";
+  try {
+    const [origin, destination, ...blockedMatches] = await Promise.all([
+      resolveExactSystem(originName), resolveExactSystem(destinationName), ...state.blockedSystems.map(resolveExactSystem)
+    ]);
+    if (!origin) throw new Error(`Origin system “${originName}” was not found.`);
+    if (!destination) throw new Error(`Destination system “${destinationName}” was not found.`);
+    const avoid = blockedMatches.filter(Boolean).map((system) => system.id);
+    const preference = mode === "shortest" ? "Shorter" : "Safer";
+    const routeResponse = await fetch(`${ESI_BASE}/route/${origin.id}/${destination.id}?compatibility_date=${ESI_COMPATIBILITY_DATE}`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ preference, security_penalty: preference === "Safer" ? 100 : 50, avoid })
+    });
+    if (!routeResponse.ok) throw new Error(`ESI route calculation failed (${routeResponse.status}).`);
+    const routeIds = await routeResponse.json();
+    const namesResponse = await fetch(`${ESI_BASE}/universe/names?compatibility_date=${ESI_COMPATIBILITY_DATE}`, {
+      method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(routeIds)
+    });
+    if (!namesResponse.ok) throw new Error("ESI route-name lookup failed.");
+    const names = await namesResponse.json();
+    const namesById = new Map(names.map((item) => [item.id, item.name]));
+    const security = await Promise.all(routeIds.map(async (id) => {
+      const response = await fetch(`${ESI_BASE}/universe/systems/${id}?compatibility_date=${ESI_COMPATIBILITY_DATE}`);
+      if (!response.ok) return 0;
+      const system = await response.json();
+      return system.security_status || 0;
+    }));
+    const blockedIds = new Set(avoid);
+    const systems = routeIds.map((id, index) => {
+      const value = security[index];
+      return {
+        id, name: namesById.get(id) || `System ${id}`, security: value.toFixed(1),
+        danger: value < 0.5 ? "critical" : value < 0.6 ? "high" : value < 0.8 ? "medium" : "low",
+        blocked: blockedIds.has(id)
+      };
+    });
+    state.liveRoute = { origin: origin.name, destination: destination.name, preference, jumps: Math.max(0, systems.length - 1), systems, blockedOnRoute: systems.filter((system) => system.blocked).map((system) => system.name) };
+    $("#origin").value = origin.name;
+    $("#destination").value = destination.name;
+  } catch (error) {
+    state.liveRoute = null;
+    state.routeError = error.message || "ESI route calculation failed.";
+  } finally {
+    state.routeLoading = false;
+    $("#results").classList.remove("loading");
+    $(".analyze").textContent = "◎ Analyze route";
+    render();
+  }
 }
 
 function showSearchStatus(message, isError = false) {
@@ -144,16 +203,13 @@ function addBlockedSystem(name) {
     return;
   }
   const next = [...state.blockedSystems, canonicalName];
-  const everyDemoRouteBlocked = blockedOnRoute("shortest", next).length > 0 && blockedOnRoute("safer", next).length > 0;
   state.blockedSystems = next;
+  state.liveRoute = null;
   input.value = "";
   state.suggestions = [];
   renderSuggestions();
   showSearchStatus("");
-  $("#block-error").textContent = everyDemoRouteBlocked ? "Every demonstration route now contains a blocked system. Live routing would need to find another path." : "";
-  $("#block-error").hidden = !everyDemoRouteBlocked;
-  const alternate = state.mode === "shortest" ? "safer" : "shortest";
-  if (blockedOnRoute(state.mode).length && !blockedOnRoute(alternate).length) state.mode = alternate;
+  $("#block-error").hidden = true;
   render();
 }
 
@@ -185,6 +241,7 @@ async function confirmBlockedSystem() {
 
 function removeBlockedSystem(name) {
   state.blockedSystems = state.blockedSystems.filter((blocked) => blocked !== name);
+  state.liveRoute = null;
   $("#block-error").hidden = true;
   render();
 }
@@ -208,31 +265,36 @@ function render() {
   const mode = state.mode;
   const origin = $("#origin").value.trim() || "Unknown";
   const destination = $("#destination").value.trim() || "Unknown";
+  const displayedSystems = state.liveRoute ? state.liveRoute.systems : data.route.systems;
+  const displayedJumps = state.liveRoute ? state.liveRoute.jumps : data.route.jumps;
+  const displayedEta = state.liveRoute ? `${Math.max(1, Math.ceil(displayedJumps * .75))}–${Math.max(2, Math.ceil(displayedJumps * 1.15))} min` : data.route.eta;
   $("#origin-title").textContent = origin;
   $("#destination-title").textContent = destination;
   $("#cargo-display").textContent = formatIsk(data.cargo);
-  $("#jumps").textContent = `${data.route.jumps} jumps`;
-  $("#eta").textContent = data.route.eta;
-  $("#route-label").textContent = data.route.label;
+  $("#jumps").textContent = `${displayedJumps} jumps`;
+  $("#eta").textContent = displayedEta;
+  $("#route-label").textContent = state.liveRoute ? `ESI ${state.liveRoute.preference.toLowerCase()}` : data.route.label;
   $("#excluded-count").textContent = state.blockedSystems.length ? `${state.blockedSystems.length} excluded` : "";
   $("#exclude-tags").innerHTML = state.blockedSystems.map((name) => `<button class="exclude-chip" type="button" data-remove-system="${escapeHtml(name)}">${escapeHtml(name)} ×</button>`).join("");
   $$("[data-remove-system]").forEach((button) => button.addEventListener("click", () => removeBlockedSystem(button.dataset.removeSystem)));
   $$(".priority").forEach((button) => {
-    const blocked = blockedOnRoute(button.dataset.mode);
-    button.disabled = blocked.length > 0;
-    button.title = blocked.length ? `Blocked by ${blocked.join(", ")}` : "";
     button.classList.toggle("active", button.dataset.mode === state.mode);
   });
 
-  $("#route-map").innerHTML = data.route.systems.map((system, index) => `
-    <div class="route-stop">
-      <div class="node ${system.danger}">${system.danger === "high" || system.danger === "critical" ? "!" : index + 1}</div>
-      <div class="system-copy"><strong>${system.name}</strong><span>${system.security} sec</span></div>
+  $("#route-map").innerHTML = displayedSystems.map((system, index) => `
+    <div class="route-stop${system.blocked ? " blocked" : ""}">
+      <div class="node ${system.danger}">${system.blocked || system.danger === "high" || system.danger === "critical" ? "!" : index === 0 ? "S" : index}</div>
+      <div class="system-copy"><small>${index === 0 ? "Start" : `Jump ${index}`}</small><strong>${escapeHtml(system.name)}</strong><span>${system.security} sec</span></div>
+      <b class="route-security ${system.danger}">${system.blocked ? "Blocked" : system.danger}</b>
     </div>`).join("");
 
-  $("#route-warning").innerHTML = mode === "shortest"
-    ? `<span class="warning-icon">▲</span>This route enters low security space through Tama. The time saved does not justify the added risk for this cargo profile.`
-    : `<span class="warning-icon safe">✓</span>This route avoids low security space, but Uedama still requires attention because high-sec does not mean risk-free.`;
+  $("#route-warning").innerHTML = state.routeError
+    ? `<span class="warning-icon">▲</span>${escapeHtml(state.routeError)}`
+    : state.liveRoute && state.liveRoute.blockedOnRoute.length
+      ? `<span class="warning-icon">▲</span>ESI returned a route containing ${escapeHtml(state.liveRoute.blockedOnRoute.join(", "))}. Review the route before undocking.`
+      : state.liveRoute
+        ? `<span class="warning-icon safe">✓</span>Complete ESI route loaded: all ${state.liveRoute.systems.length} systems are shown and your blocked systems were excluded.`
+        : `<span class="warning-icon">▲</span>Demonstration route shown. Analyze to load every jump from ESI.`;
 
   const riskCard = $("#risk-card");
   riskCard.className = `risk-card ${data.level.toLowerCase()}`;
@@ -245,12 +307,7 @@ function render() {
     : data.level === "ELEVATED"
       ? "Travel is possible with preparation, but one or more systems need caution."
       : "No major route warning is present in this demonstration profile.";
-  const alternate = mode === "shortest" ? "safer" : "shortest";
-  const alternateBlocked = blockedOnRoute(alternate);
-  $("#compare-route").disabled = alternateBlocked.length > 0;
-  $("#compare-route").textContent = alternateBlocked.length
-    ? `⌁ ${alternate === "safer" ? "Safer" : "Shortest"} route blocked by ${alternateBlocked.join(", ")}`
-    : mode === "shortest" ? "⌁ Compare safer route" : "⌁ Compare shortest route";
+  $("#compare-route").textContent = mode === "shortest" ? "⌁ Compare safer route" : "⌁ Compare shortest route";
 
   $("#factors-panel").innerHTML = `<div class="factor-grid">
     ${factor("◇", "Security status", data.route.factors.security, 28, mode === "shortest" ? "Route includes 0.3 low-sec systems." : "Route remains in high security space.", mode === "shortest" ? "critical" : "low")}
@@ -258,7 +315,7 @@ function render() {
     ${factor("⌖", "Chokepoints", data.route.factors.chokepoint, 16, "Known pipeline systems raise the route baseline.", mode === "shortest" ? "critical" : "medium")}
     ${factor("◈", "Value exposed", data.cargoValue, 18, `${formatIsk(data.cargo)} makes the trip ${data.cargoValue >= 10 ? "more attractive" : "less attractive"} to attackers.`, data.cargoValue >= 10 ? "high" : "low")}
     ${factor("▰", "Ship vulnerability", data.ship.vulnerability, 14, data.ship.note, data.ship.vulnerability >= 10 ? "high" : "low")}
-    ${factor("◷", "Route exposure", data.route.factors.exposure, 10, `${data.route.jumps} gates create ${mode === "safer" ? "more encounters, but avoid low-sec" : "a shorter exposure window"}.`, "medium")}
+    ${factor("◷", "Route exposure", data.route.factors.exposure, 10, `${displayedJumps} gates create ${mode === "safer" ? "more encounters, but favor safer space" : "a shorter exposure window"}.`, "medium")}
   </div>`;
 
   const formulaItems = [
@@ -279,14 +336,15 @@ function render() {
 
 function setMode(mode) {
   state.mode = mode;
+  state.liveRoute = null;
   $$(".priority").forEach((button) => button.classList.toggle("active", button.dataset.mode === mode));
   render();
+  void loadLiveRoute(mode);
 }
 
 $("#route-form").addEventListener("submit", (event) => {
   event.preventDefault();
-  $("#results").classList.add("loading");
-  window.setTimeout(() => { render(); $("#results").classList.remove("loading"); }, 220);
+  void loadLiveRoute();
 });
 $$(["#origin", "#destination", "#cargo", "#ship"].join(",")).forEach((control) => control.addEventListener("change", render));
 $("#cargo").addEventListener("input", () => $("#cargo-display").textContent = formatIsk(Math.max(0, Number($("#cargo").value) || 0)));
@@ -304,7 +362,7 @@ $("#block-input").addEventListener("keydown", (event) => {
   }
 });
 $$([".priority"].join(",")).forEach((button) => button.addEventListener("click", () => setMode(button.dataset.mode)));
-$("#compare-route").addEventListener("click", () => { const alternate = state.mode === "shortest" ? "safer" : "shortest"; if (!blockedOnRoute(alternate).length) setMode(alternate); });
+$("#compare-route").addEventListener("click", () => { const alternate = state.mode === "shortest" ? "safer" : "shortest"; setMode(alternate); });
 $$([".tab"].join(",")).forEach((button) => button.addEventListener("click", () => {
   $$(".tab").forEach((tab) => tab.classList.toggle("active", tab === button));
   $("#factors-panel").classList.toggle("hidden", button.dataset.tab !== "factors");
@@ -312,3 +370,4 @@ $$([".tab"].join(",")).forEach((button) => button.addEventListener("click", () =
 }));
 
 render();
+void loadLiveRoute();
